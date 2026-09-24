@@ -1,18 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import {
+  useFollowGraph,
+  useSetFollowing,
+  useSetStoryLiked,
+  useStoryLikes,
+} from '../api/queries';
 import { StoryCard } from '../components/StoryCard';
-import type { AppAction, AppState } from '../state/appReducer';
-import { selectVisibleStories } from '../state/appReducer';
+import { stories } from '../data';
+import { type AppState, filterStories } from '../state/appReducer';
 import { colors, fonts } from '../theme';
 
-type DiscoverScreenProps = {
-  state: AppState;
-  dispatch: (action: AppAction) => void;
-};
+type DiscoverScreenProps = Pick<AppState, 'category' | 'discoverQuery'>;
 
-export function DiscoverScreen({ state, dispatch }: DiscoverScreenProps) {
-  const visibleStories = selectVisibleStories(state);
+export function DiscoverScreen({
+  category,
+  discoverQuery,
+}: DiscoverScreenProps) {
+  const visibleStories = filterStories(stories, { category, discoverQuery });
+  const likedStoryIds = useStoryLikes().data ?? [];
+  const following = useFollowGraph().data?.following ?? [];
+  const setLiked = useSetStoryLiked();
+  const setFollowing = useSetFollowing();
 
   return (
     <ScrollView
@@ -25,34 +35,38 @@ export function DiscoverScreen({ state, dispatch }: DiscoverScreenProps) {
           <Text style={styles.title}>Discover</Text>
           <Text style={styles.subtitle}>Stories people are sharing now</Text>
         </View>
-        {state.category !== 'All' && (
+        {category !== 'All' && (
           <View style={styles.filterBadge}>
-            <Text style={styles.filterText}>{state.category}</Text>
+            <Text style={styles.filterText}>{category}</Text>
           </View>
         )}
       </View>
 
       {visibleStories.length > 0 ? (
-        visibleStories.map((story) => (
-          <StoryCard
-            comments={state.comments[story.id] ?? []}
-            following={state.following.some(
-              (person) => person.id === story.authorId,
-            )}
-            key={story.id}
-            liked={state.likedStoryIds.includes(story.id)}
-            onAddComment={(comment) =>
-              dispatch({ type: 'addComment', storyId: story.id, comment })
-            }
-            onToggleFollow={() =>
-              dispatch({ type: 'toggleFollow', authorId: story.authorId })
-            }
-            onToggleLike={() =>
-              dispatch({ type: 'toggleLike', storyId: story.id })
-            }
-            story={story}
-          />
-        ))
+        visibleStories.map((story) => {
+          const isFollowing = following.some(
+            (person) => person.id === story.authorId,
+          );
+          const liked = likedStoryIds.includes(story.id);
+
+          return (
+            <StoryCard
+              following={isFollowing}
+              key={story.id}
+              liked={liked}
+              onToggleFollow={() =>
+                setFollowing.mutate({
+                  personId: story.authorId,
+                  follow: !isFollowing,
+                })
+              }
+              onToggleLike={() =>
+                setLiked.mutate({ storyId: story.id, like: !liked })
+              }
+              story={story}
+            />
+          );
+        })
       ) : (
         <View style={styles.empty}>
           <Ionicons color={colors.tealMuted} name="search-outline" size={42} />

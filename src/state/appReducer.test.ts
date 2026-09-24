@@ -1,93 +1,73 @@
+import { people, stories } from '../data';
 import {
   appReducer,
+  filterPeople,
+  filterStories,
   initialAppState,
-  selectVisiblePeople,
-  selectVisibleStories,
+  splitFollowGraph,
 } from './appReducer';
 
 describe('appReducer', () => {
-  it('toggles following without duplicating an author', () => {
-    const followed = appReducer(initialAppState, {
-      type: 'toggleFollow',
-      authorId: 'amit-saxena',
-    });
-    const unfollowed = appReducer(followed, {
-      type: 'toggleFollow',
-      authorId: 'amit-saxena',
+  it('brings Discover forward when searching or filtering from Profile', () => {
+    const onProfile = appReducer(initialAppState, {
+      type: 'navigate',
+      tab: 'profile',
     });
 
     expect(
-      followed.following.filter((person) => person.id === 'amit-saxena'),
-    ).toHaveLength(1);
+      appReducer(onProfile, { type: 'searchDiscover', query: 'Delhi' }),
+    ).toMatchObject({ activeTab: 'discover', discoverQuery: 'Delhi' });
     expect(
-      unfollowed.following.some((person) => person.id === 'amit-saxena'),
-    ).toBe(false);
+      appReducer(onProfile, { type: 'selectCategory', category: 'Local' }),
+    ).toMatchObject({ activeTab: 'discover', category: 'Local' });
   });
 
-  it('ignores empty comments and appends trimmed comments', () => {
-    const unchanged = appReducer(initialAppState, {
-      type: 'addComment',
-      storyId: 'kappan-story',
-      comment: '   ',
-    });
-    const changed = appReducer(initialAppState, {
-      type: 'addComment',
-      storyId: 'kappan-story',
-      comment: '  Important update  ',
+  it('clears the people search when switching people tabs', () => {
+    const searched = appReducer(initialAppState, {
+      type: 'searchPeople',
+      query: 'riya',
     });
 
-    expect(unchanged).toBe(initialAppState);
-    expect(changed.comments['kappan-story']).toEqual([
-      {
-        id: 'kappan-story-priya-1',
-        author: 'Priya chauhan',
-        text: 'We wanted this!!!!',
-        own: false,
-      },
-      {
-        id: 'kappan-story-own-1',
-        author: 'You',
-        text: 'Important update',
-        own: true,
-      },
-    ]);
+    expect(
+      appReducer(searched, { type: 'selectPeopleTab', tab: 'following' }),
+    ).toMatchObject({ peopleTab: 'following', peopleQuery: '' });
   });
+});
 
-  it('filters stories by category and text together', () => {
-    const categorized = appReducer(initialAppState, {
-      type: 'selectCategory',
-      category: 'Politics',
-    });
-    const searched = appReducer(categorized, {
-      type: 'searchDiscover',
-      query: 'Delhi',
-    });
-
-    expect(selectVisibleStories(searched).map((story) => story.id)).toEqual([
-      'modi-address',
-    ]);
+describe('filterStories', () => {
+  it('matches category and text together, including author names', () => {
+    expect(
+      filterStories(stories, { category: 'Politics', discoverQuery: 'Delhi' }),
+    ).toEqual([expect.objectContaining({ id: 'modi-address' })]);
+    expect(
+      filterStories(stories, { category: 'All', discoverQuery: 'amit' }),
+    ).toEqual([expect.objectContaining({ id: 'kappan-story' })]);
   });
+});
 
-  it('removes only the confirmed follower and preserves following', () => {
-    const nextState = appReducer(initialAppState, {
-      type: 'removeFollower',
-      personId: 'noishina',
-    });
-
-    expect(nextState.followers.some((person) => person.id === 'noishina')).toBe(
-      false,
+describe('splitFollowGraph', () => {
+  it('splits edges around the user and skips unknown ids', () => {
+    const graph = splitFollowGraph(
+      [
+        { follower_id: 'noishina', followee_id: 'me' },
+        { follower_id: 'someone-else', followee_id: 'me' },
+        { follower_id: 'me', followee_id: 'nidhi-gupta' },
+      ],
+      'me',
     );
-    expect(nextState.following).toBe(initialAppState.following);
+
+    expect(graph.followers.map((person) => person.id)).toEqual(['noishina']);
+    expect(graph.following.map((person) => person.id)).toEqual(['nidhi-gupta']);
   });
+});
 
-  it('searches the active people list by name or phone', () => {
-    const state = appReducer(initialAppState, {
-      type: 'searchProfile',
-      query: '5361',
-    });
-
-    expect(selectVisiblePeople(state).map((person) => person.id)).toEqual([
+describe('filterPeople', () => {
+  it('searches by name or phone', () => {
+    expect(filterPeople(people, '5361').map((person) => person.id)).toEqual([
       'noishina',
+    ]);
+    expect(filterPeople(people, ' RIYA ').map((person) => person.id)).toEqual([
+      'riya',
     ]);
   });
 });

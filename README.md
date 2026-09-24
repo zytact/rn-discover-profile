@@ -1,23 +1,25 @@
-# Discover and Profile screens
+# BWstory Discover and Profile screens
 
-A React Native app with a news Discover feed and a user Profile, built with Expo. All data is local, so every screen works offline.
+A React Native (Expo) clone of the Discover and Profile screens from [BWstory](https://play.google.com/store/apps/details?id=com.blackcoffer.bnews). Stories ship with the app. Likes, follows, comments and the profile are stored in Supabase.
 
 ## Features
 
-- Discover feed with search, category filters, likes, follows, comments, and sharing
-- Video preview controls for play, pause, seek, and mute
-- Profile with follower and following tabs, people search, and follower removal
-- Editable profile details
+- Discover feed with search, category filters, likes, follows, comments, comment likes, replies and sharing
+- Video preview controls for play, pause, seek and mute
+- Profile with follower and following tabs, people search, removing followers and unfollowing
+- Editable profile with photo upload, gender and a 120-word bio
+
+Each install signs in anonymously and starts as the demo profile from the reference screens, with its own followers and likes. Comments are shared by everyone.
 
 ## Install the APK
 
-Download `discover-profile.apk` from the [latest release](https://github.com/zytact/rn-discover-profile/releases/latest), open it on an Android device, and allow installs from unknown sources when asked. Or, with a device connected:
+Download `bwstory.apk` from the [latest release](https://github.com/zytact/rn-discover-profile/releases/latest), open it on an Android device, and allow installs from unknown sources when asked. Or, with a device connected:
 
 ```sh
-adb install -r discover-profile.apk
+adb install -r bwstory.apk
 ```
 
-The APK is signed with a debug key for sideloading. Tested on Android 12 (API 31).
+The APK is signed with a debug key for sideloading. Tested on Android 12 (API 31). It needs an internet connection on first launch. After that, stories still show offline, and likes, follows and comments are sent when the connection returns.
 
 ## Run from source
 
@@ -29,3 +31,16 @@ pnpm android      # run in development
 pnpm build:apk    # release APK at android/app/build/outputs/apk/release/
 pnpm check        # typecheck, lint, format, tests
 ```
+
+`.env` points at the hosted Supabase project. It only holds the project URL and the publishable key, which are public by design and end up in the APK anyway.
+
+## Backend
+
+The schema, row-level security policies and seed data are in `supabase/migrations`. To use your own Supabase project:
+
+1. Apply the migration, for example with `supabase db push`.
+2. Enable anonymous sign-ins under Authentication, Sign In / Providers.
+3. Upload `supabase/avatars/*.png` to the `avatars` bucket under `defaults/`.
+4. Put the project URL and publishable key in `.env`, and update the project id in the `gen:types` script.
+
+Free projects pause after 7 days without activity. `.github/workflows/keep-supabase-awake.yml` queries the database every 5 days to prevent that. Scheduled workflows only run from the default branch.

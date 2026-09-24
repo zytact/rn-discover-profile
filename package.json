@@ -14,13 +14,20 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:ci"
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:ci",
+    "gen:types": "pnpm dlx supabase gen types typescript --project-id blevdmucynsqwmhrmrhj --schema public > src/api/database.types.ts"
   },
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",
     "@expo/vector-icons": "^15.1.1",
+    "@react-native-community/netinfo": "12.0.1",
+    "@supabase/supabase-js": "^2.117.1",
+    "@tanstack/react-query": "^5.103.2",
     "expo": "~57.0.24",
+    "expo-crypto": "~57.0.3",
     "expo-font": "~57.0.4",
+    "expo-image-picker": "~57.0.19",
+    "expo-sqlite": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
     "react": "19.2.3",
@@ -44,7 +51,8 @@
       "/android/"
     ],
     "collectCoverageFrom": [
-      "src/state/**/*.ts"
+      "src/state/**/*.ts",
+      "src/format.ts"
     ]
   }
 }

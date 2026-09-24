@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Discover",
+    "name": "BWstory",
     "slug": "rn-discover-profile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -23,6 +23,16 @@
     "ios": {
       "bundleIdentifier": "com.arnab.discoverprofile",
       "supportsTablet": true
-    }
+    },
+    "plugins": [
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ]
   }
 }

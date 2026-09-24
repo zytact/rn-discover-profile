@@ -1,150 +1,61 @@
-import { initialFollowers, initialFollowing, stories } from '../data';
-import type {
-  AppTab,
-  Person,
-  Profile,
-  Story,
-  StoryCategory,
-  StoryComment,
-} from '../types';
+import { findPerson, getPerson } from '../data';
+import type { AppTab, Person, Story, StoryCategory } from '../types';
 
 export type PeopleTab = 'followers' | 'following';
 export type CategoryFilter = 'All' | StoryCategory;
 
+// UI state only. Server data lives in the TanStack Query cache (src/api).
 export type AppState = {
   activeTab: AppTab;
   discoverQuery: string;
-  profileQuery: string;
+  peopleQuery: string;
   category: CategoryFilter;
-  likedStoryIds: readonly string[];
-  comments: Readonly<Record<string, readonly StoryComment[]>>;
-  followers: readonly Person[];
-  following: readonly Person[];
   peopleTab: PeopleTab;
-  profile: Profile;
 };
 
 export type AppAction =
   | { type: 'navigate'; tab: AppTab }
   | { type: 'searchDiscover'; query: string }
-  | { type: 'searchProfile'; query: string }
+  | { type: 'searchPeople'; query: string }
   | { type: 'selectCategory'; category: CategoryFilter }
-  | { type: 'toggleFollow'; authorId: string }
-  | { type: 'toggleLike'; storyId: string }
-  | { type: 'addComment'; storyId: string; comment: string }
-  | { type: 'selectPeopleTab'; tab: PeopleTab }
-  | { type: 'removeFollower'; personId: string }
-  | { type: 'updateProfile'; profile: Profile };
+  | { type: 'selectPeopleTab'; tab: PeopleTab };
 
 export const initialAppState: AppState = {
   activeTab: 'discover',
   discoverQuery: '',
-  profileQuery: '',
+  peopleQuery: '',
   category: 'All',
-  likedStoryIds: [],
-  comments: {
-    'kappan-story': [
-      {
-        id: 'kappan-story-priya-1',
-        author: 'Priya chauhan',
-        text: 'We wanted this!!!!',
-        own: false,
-      },
-    ],
-  },
-  followers: initialFollowers,
-  following: initialFollowing,
   peopleTab: 'followers',
-  profile: {
-    name: 'Neha Sharma',
-    location: 'Greater noida',
-    profession: 'Anchor',
-    bio: 'Independent reporter covering stories from the community.',
-  },
 };
-
-const toggleId = (ids: readonly string[], id: string): readonly string[] =>
-  ids.includes(id) ? ids.filter((currentId) => currentId !== id) : [...ids, id];
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'navigate':
       return { ...state, activeTab: action.tab };
+    // The header search and filter always act on stories, so they bring
+    // Discover forward when used from another tab.
     case 'searchDiscover':
-      return { ...state, discoverQuery: action.query };
-    case 'searchProfile':
-      return { ...state, profileQuery: action.query };
+      return { ...state, activeTab: 'discover', discoverQuery: action.query };
     case 'selectCategory':
-      return { ...state, category: action.category };
-    case 'toggleFollow': {
-      const story = stories.find((item) => item.authorId === action.authorId);
-      if (!story) return state;
-
-      return {
-        ...state,
-        following: state.following.some(
-          (person) => person.id === action.authorId,
-        )
-          ? state.following.filter((person) => person.id !== action.authorId)
-          : [
-              ...state.following,
-              {
-                id: story.authorId,
-                name: story.author,
-                phone: story.authorPhone,
-                avatar: story.avatar,
-              },
-            ],
-      };
-    }
-    case 'toggleLike':
-      return {
-        ...state,
-        likedStoryIds: toggleId(state.likedStoryIds, action.storyId),
-      };
-    case 'addComment': {
-      const comment = action.comment.trim();
-      if (comment.length === 0) return state;
-
-      return {
-        ...state,
-        comments: {
-          ...state.comments,
-          [action.storyId]: [
-            ...(state.comments[action.storyId] ?? []),
-            {
-              id: `${action.storyId}-own-${state.comments[action.storyId]?.length ?? 0}`,
-              author: 'You',
-              text: comment,
-              own: true,
-            },
-          ],
-        },
-      };
-    }
+      return { ...state, activeTab: 'discover', category: action.category };
+    case 'searchPeople':
+      return { ...state, peopleQuery: action.query };
     case 'selectPeopleTab':
-      return { ...state, peopleTab: action.tab, profileQuery: '' };
-    case 'removeFollower':
-      return {
-        ...state,
-        followers: state.followers.filter(
-          (person) => person.id !== action.personId,
-        ),
-      };
-    case 'updateProfile':
-      return { ...state, profile: action.profile };
+      return { ...state, peopleTab: action.tab, peopleQuery: '' };
   }
 }
 
-export function selectVisibleStories(state: AppState): readonly Story[] {
-  const query = state.discoverQuery.trim().toLocaleLowerCase();
+export function filterStories(
+  stories: readonly Story[],
+  { category, discoverQuery }: Pick<AppState, 'category' | 'discoverQuery'>,
+): readonly Story[] {
+  const query = discoverQuery.trim().toLocaleLowerCase();
 
   return stories.filter((story) => {
-    const matchesCategory =
-      state.category === 'All' || story.category === state.category;
+    const matchesCategory = category === 'All' || story.category === category;
     const matchesQuery =
       query.length === 0 ||
-      story.author.toLocaleLowerCase().includes(query) ||
+      getPerson(story.authorId).name.toLocaleLowerCase().includes(query) ||
       story.headline.toLocaleLowerCase().includes(query) ||
       story.location.toLocaleLowerCase().includes(query);
 
@@ -152,11 +63,33 @@ export function selectVisibleStories(state: AppState): readonly Story[] {
   });
 }
 
-export function selectVisiblePeople(state: AppState): readonly Person[] {
-  const people =
-    state.peopleTab === 'followers' ? state.followers : state.following;
-  const query = state.profileQuery.trim().toLocaleLowerCase();
+// Splits the signed-in user's follow edges into the two lists on the profile.
+// Ids that aren't bundled people are skipped.
+export function splitFollowGraph(
+  edges: readonly { follower_id: string; followee_id: string }[],
+  userId: string,
+) {
+  const followers: Person[] = [];
+  const following: Person[] = [];
 
+  for (const edge of edges) {
+    if (edge.followee_id === userId) {
+      const person = findPerson(edge.follower_id);
+      if (person) followers.push(person);
+    } else if (edge.follower_id === userId) {
+      const person = findPerson(edge.followee_id);
+      if (person) following.push(person);
+    }
+  }
+
+  return { followers, following };
+}
+
+export function filterPeople(
+  people: readonly Person[],
+  rawQuery: string,
+): readonly Person[] {
+  const query = rawQuery.trim().toLocaleLowerCase();
   if (query.length === 0) return people;
 
   return people.filter(
