@@ -182,7 +182,9 @@ export function EditProfileModal({ profile, onClose }: EditProfileModalProps) {
                 pressed && styles.pressed,
               ]}
             >
-              {saveProfile.isPending ? (
+              {saveProfile.isPaused ? (
+                <Text style={styles.saveText}>Waiting for connection...</Text>
+              ) : saveProfile.isPending ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
                 <Text style={styles.saveText}>Save changes</Text>

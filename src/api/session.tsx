@@ -42,6 +42,8 @@ export function SessionGate({ loading, failed, children }: SessionGateProps) {
   const session = useQuery({
     queryKey: ['userId'],
     queryFn: ensureUserId,
+    // A stored session needs no network, so don't wait for one.
+    networkMode: 'always',
     staleTime: Infinity,
     gcTime: Infinity,
   });

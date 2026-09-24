@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { useIsOnline } from './src/api/online';
 import { useProfile } from './src/api/queries';
 import { SessionGate } from './src/api/session';
 import { AppHeader } from './src/components/AppHeader';
@@ -118,6 +119,7 @@ function AppContent() {
         onMenuPress={() => setMenuOpen(true)}
         query={state.discoverQuery}
       />
+      <OfflineBanner />
       <KeyboardAvoidingView behavior="padding" style={styles.body}>
         {state.activeTab === 'discover' ? (
           <DiscoverScreen
@@ -158,6 +160,20 @@ function AppContent() {
         <EditProfileModal onClose={() => setEditing(false)} profile={profile} />
       )}
     </SafeAreaView>
+  );
+}
+
+function OfflineBanner() {
+  const online = useIsOnline();
+  if (online) return null;
+
+  return (
+    <View accessibilityLiveRegion="polite" style={styles.offline}>
+      <Ionicons color={colors.white} name="cloud-offline-outline" size={16} />
+      <Text style={styles.offlineText}>
+        {"You're offline. Changes will be sent when you reconnect."}
+      </Text>
+    </View>
   );
 }
 
@@ -439,6 +455,20 @@ const styles = StyleSheet.create({
   modalRow: {
     flex: 1,
     flexDirection: 'row',
+  },
+  offline: {
+    alignItems: 'center',
+    backgroundColor: colors.ink,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  offlineText: {
+    color: colors.white,
+    flex: 1,
+    fontFamily: fonts.medium,
+    fontSize: 12,
   },
   safeArea: {
     backgroundColor: colors.teal,

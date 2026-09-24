@@ -19,7 +19,7 @@ Download `bwstory.apk` from the [latest release](https://github.com/zytact/rn-di
 adb install -r bwstory.apk
 ```
 
-The APK is signed with a debug key for sideloading. Tested on Android 12 (API 31). It needs an internet connection on first launch.
+The APK is signed with a debug key for sideloading. Tested on Android 12 (API 31). It needs an internet connection on first launch. After that, stories still show offline, and likes, follows and comments are sent when the connection returns.
 
 ## Run from source
 
@@ -42,3 +42,5 @@ The schema, row-level security policies and seed data are in `supabase/migration
 2. Enable anonymous sign-ins under Authentication, Sign In / Providers.
 3. Upload `supabase/avatars/*.png` to the `avatars` bucket under `defaults/`.
 4. Put the project URL and publishable key in `.env`, and update the project id in the `gen:types` script.
+
+Free projects pause after 7 days without activity. `.github/workflows/keep-supabase-awake.yml` queries the database every 5 days to prevent that. Scheduled workflows only run from the default branch.

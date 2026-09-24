@@ -49,9 +49,17 @@ export function ProfileScreen({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (profile.isPending || graph.isPending) {
+    const waitingForNetwork =
+      profile.fetchStatus === 'paused' || graph.fetchStatus === 'paused';
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.teal} size="large" />
+        {waitingForNetwork ? (
+          <Text style={styles.noPeople}>
+            {"Your profile will load when you're back online."}
+          </Text>
+        ) : (
+          <ActivityIndicator color={colors.teal} size="large" />
+        )}
       </View>
     );
   }
