@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { createContext, type ReactNode, use } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createContext, type ReactNode, use, useEffect } from 'react';
 
 import { supabase } from './supabase';
 
@@ -25,6 +25,20 @@ type SessionGateProps = {
 // Renders children only once there is a signed-in user, so everything below
 // can call useUserId() without handling a missing session.
 export function SessionGate({ loading, failed, children }: SessionGateProps) {
+  const queryClient = useQueryClient();
+
+  // If auth-js drops the session (for example a revoked refresh token), start
+  // over as a new anonymous user instead of querying with a dead user id.
+  // Deferred because supabase calls inside this callback can deadlock.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setTimeout(() => void queryClient.resetQueries(), 0);
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, [queryClient]);
+
   const session = useQuery({
     queryKey: ['userId'],
     queryFn: ensureUserId,

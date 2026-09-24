@@ -17,7 +17,7 @@ import {
   useAddComment,
   useDeleteComment,
   useProfile,
-  useToggleCommentLike,
+  useSetCommentLiked,
 } from '../api/queries';
 import { useUserId } from '../api/session';
 import { formatRelativeTime } from '../format';
@@ -33,7 +33,7 @@ export function CommentSection({ storyId, comments }: CommentSectionProps) {
   const profile = useProfile().data;
   const addComment = useAddComment(storyId);
   const deleteComment = useDeleteComment(storyId);
-  const toggleLike = useToggleCommentLike(storyId);
+  const setLiked = useSetCommentLiked(storyId);
   const [draft, setDraft] = useState('');
   const input = useRef<TextInput>(null);
   const body = draft.trim();
@@ -89,7 +89,7 @@ export function CommentSection({ storyId, comments }: CommentSectionProps) {
                   accessibilityRole="button"
                   hitSlop={8}
                   onPress={() =>
-                    toggleLike.mutate({ commentId: comment.id, liked })
+                    setLiked.mutate({ commentId: comment.id, like: !liked })
                   }
                   style={styles.action}
                 >

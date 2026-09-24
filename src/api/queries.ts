@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { randomUUID } from 'expo-crypto';
 import { Alert } from 'react-native';
 
 import { splitFollowGraph } from '../state/appReducer';
@@ -20,7 +21,8 @@ const queryKeys = {
 };
 
 // Writes `update` into the cache before the request, rolls back if it fails,
-// and refetches after the last overlapping mutation on the same key settles.
+// and refetches after the last queued mutation on the same key settles.
+// Mutations on one key run in order, so the server ends on the last tap.
 function useOptimisticMutation<TData, TVariables>({
   queryKey,
   mutationFn,
@@ -34,6 +36,7 @@ function useOptimisticMutation<TData, TVariables>({
 
   return useMutation({
     mutationKey: queryKey,
+    scope: { id: JSON.stringify(queryKey) },
     mutationFn,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey });
@@ -59,10 +62,9 @@ function useOptimisticMutation<TData, TVariables>({
 
 export const avatarSource = ({
   avatar_path,
-  updated_at,
-}: Pick<Profile, 'avatar_path' | 'updated_at'>) => ({
-  // updated_at changes on every save, so a replaced avatar gets a fresh URL.
-  uri: `${supabase.storage.from('avatars').getPublicUrl(avatar_path).data.publicUrl}?v=${Date.parse(updated_at)}`,
+}: Pick<Profile, 'avatar_path'>) => ({
+  uri: supabase.storage.from('avatars').getPublicUrl(avatar_path).data
+    .publicUrl,
 });
 
 export function useProfile() {
@@ -101,28 +103,42 @@ export function useSaveProfile() {
       changes: ProfileChanges;
       avatar: PickedAvatar | null;
     }) => {
-      let avatarPath: string | undefined;
-      if (avatar) {
-        avatarPath = `${userId}/avatar`;
-        const body = await (await fetch(avatar.uri)).arrayBuffer();
-        const { error } = await supabase.storage
-          .from('avatars')
-          .upload(avatarPath, body, {
-            contentType: avatar.mimeType,
-            upsert: true,
-          });
-        if (error) throw error;
+      if (!avatar) {
+        return (
+          await supabase
+            .from('profiles')
+            .update(changes)
+            .eq('id', userId)
+            .select()
+            .single()
+            .throwOnError()
+        ).data;
       }
 
-      return (
-        await supabase
-          .from('profiles')
-          .update({ ...changes, avatar_path: avatarPath })
-          .eq('id', userId)
-          .select()
-          .single()
-          .throwOnError()
-      ).data;
+      // Every upload gets a new path, so a changed avatar always has a new URL.
+      const avatars = supabase.storage.from('avatars');
+      const previousPath = queryClient.getQueryData<Profile>(
+        queryKeys.profile(userId),
+      )?.avatar_path;
+      const avatarPath = `${userId}/${randomUUID()}`;
+      const body = await (await fetch(avatar.uri)).arrayBuffer();
+      const { error } = await avatars.upload(avatarPath, body, {
+        contentType: avatar.mimeType,
+      });
+      if (error) throw error;
+
+      const { data: profile, error: updateError } = await supabase
+        .from('profiles')
+        .update({ ...changes, avatar_path: avatarPath })
+        .eq('id', userId)
+        .select()
+        .single();
+      const unusedPath = updateError ? avatarPath : previousPath;
+      if (unusedPath?.startsWith(`${userId}/`)) {
+        await avatars.remove([unusedPath]);
+      }
+      if (updateError) throw updateError;
+      return profile;
     },
     onSuccess: (profile) => {
       queryClient.setQueryData(queryKeys.profile(userId), profile);
@@ -151,29 +167,32 @@ export function useFollowGraph() {
   });
 }
 
-export function useToggleFollow() {
+// Variables carry the state the user asked for, so repeated taps are idempotent.
+export function useSetFollowing() {
   const userId = useUserId();
 
   return useOptimisticMutation<
     FollowEdge[],
-    { personId: string; following: boolean }
+    { personId: string; follow: boolean }
   >({
     queryKey: queryKeys.follows(userId),
-    mutationFn: async ({ personId, following }) => {
+    mutationFn: async ({ personId, follow }) => {
       const edge = { follower_id: userId, followee_id: personId };
       await (
-        following
-          ? supabase.from('follows').delete().match(edge)
-          : supabase.from('follows').upsert(edge, { ignoreDuplicates: true })
+        follow
+          ? supabase.from('follows').upsert(edge, { ignoreDuplicates: true })
+          : supabase.from('follows').delete().match(edge)
       ).throwOnError();
     },
-    update: (edges, { personId, following }) =>
-      following
-        ? edges.filter(
-            (edge) =>
-              !(edge.follower_id === userId && edge.followee_id === personId),
-          )
-        : [...edges, { follower_id: userId, followee_id: personId }],
+    update: (edges, { personId, follow }) => {
+      const rest = edges.filter(
+        (edge) =>
+          !(edge.follower_id === userId && edge.followee_id === personId),
+      );
+      return follow
+        ? [...rest, { follower_id: userId, followee_id: personId }]
+        : rest;
+    },
   });
 }
 
@@ -209,25 +228,27 @@ export function useStoryLikes() {
   });
 }
 
-export function useToggleStoryLike() {
+export function useSetStoryLiked() {
   const userId = useUserId();
 
-  return useOptimisticMutation<string[], { storyId: string; liked: boolean }>({
+  return useOptimisticMutation<string[], { storyId: string; like: boolean }>({
     queryKey: queryKeys.storyLikes(userId),
-    mutationFn: async ({ storyId, liked }) => {
+    mutationFn: async ({ storyId, like }) => {
       await (
-        liked
-          ? supabase.from('story_likes').delete().match({
+        like
+          ? supabase
+              .from('story_likes')
+              .upsert({ story_id: storyId }, { ignoreDuplicates: true })
+          : supabase.from('story_likes').delete().match({
               user_id: userId,
               story_id: storyId,
             })
-          : supabase
-              .from('story_likes')
-              .upsert({ story_id: storyId }, { ignoreDuplicates: true })
       ).throwOnError();
     },
-    update: (storyIds, { storyId, liked }) =>
-      liked ? storyIds.filter((id) => id !== storyId) : [...storyIds, storyId],
+    update: (storyIds, { storyId, like }) => {
+      const rest = storyIds.filter((id) => id !== storyId);
+      return like ? [...rest, storyId] : rest;
+    },
   });
 }
 
@@ -235,7 +256,7 @@ const commentsQuery = (storyId: string) =>
   supabase
     .from('comments')
     .select(
-      'id, body, created_at, author_id, author:profiles(name, avatar_path, updated_at), comment_likes(user_id)',
+      'id, body, created_at, author_id, author:profiles(name, avatar_path), comment_likes(user_id)',
     )
     .eq('story_id', storyId)
     .order('created_at');
@@ -292,38 +313,36 @@ export function useDeleteComment(storyId: string) {
   });
 }
 
-export function useToggleCommentLike(storyId: string) {
+export function useSetCommentLiked(storyId: string) {
   const userId = useUserId();
 
   return useOptimisticMutation<
     StoryComment[],
-    { commentId: string; liked: boolean }
+    { commentId: string; like: boolean }
   >({
     queryKey: queryKeys.comments(storyId),
-    mutationFn: async ({ commentId, liked }) => {
+    mutationFn: async ({ commentId, like }) => {
       await (
-        liked
+        like
           ? supabase
+              .from('comment_likes')
+              .upsert({ comment_id: commentId }, { ignoreDuplicates: true })
+          : supabase
               .from('comment_likes')
               .delete()
               .match({ comment_id: commentId, user_id: userId })
-          : supabase
-              .from('comment_likes')
-              .upsert({ comment_id: commentId }, { ignoreDuplicates: true })
       ).throwOnError();
     },
-    update: (comments, { commentId, liked }) =>
-      comments.map((comment) =>
-        comment.id === commentId
-          ? {
-              ...comment,
-              comment_likes: liked
-                ? comment.comment_likes.filter(
-                    (like) => like.user_id !== userId,
-                  )
-                : [...comment.comment_likes, { user_id: userId }],
-            }
-          : comment,
-      ),
+    update: (comments, { commentId, like }) =>
+      comments.map((comment) => {
+        if (comment.id !== commentId) return comment;
+        const rest = comment.comment_likes.filter(
+          (commentLike) => commentLike.user_id !== userId,
+        );
+        return {
+          ...comment,
+          comment_likes: like ? [...rest, { user_id: userId }] : rest,
+        };
+      }),
   });
 }

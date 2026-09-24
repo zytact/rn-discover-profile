@@ -17,7 +17,7 @@ import {
   useFollowGraph,
   useProfile,
   useRemoveFollower,
-  useToggleFollow,
+  useSetFollowing,
 } from '../api/queries';
 import {
   type AppAction,
@@ -43,8 +43,10 @@ export function ProfileScreen({
   const profile = useProfile();
   const graph = useFollowGraph();
   const removeFollower = useRemoveFollower();
-  const toggleFollow = useToggleFollow();
+  const setFollowing = useSetFollowing();
+  // Kept after closing so the dialog doesn't change while it fades out.
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (profile.isPending || graph.isPending) {
     return (
@@ -78,14 +80,19 @@ export function ProfileScreen({
     peopleQuery,
   );
 
+  const ask = (action: PendingAction) => {
+    setPending(action);
+    setConfirmOpen(true);
+  };
+
   const confirm = () => {
     if (!pending) return;
     if (pending.kind === 'removeFollower') {
       removeFollower.mutate(pending.person.id);
     } else {
-      toggleFollow.mutate({ personId: pending.person.id, following: true });
+      setFollowing.mutate({ personId: pending.person.id, follow: false });
     }
-    setPending(null);
+    setConfirmOpen(false);
   };
 
   return (
@@ -181,7 +188,7 @@ export function ProfileScreen({
                 <Pressable
                   accessibilityLabel={`Remove ${person.name}`}
                   accessibilityRole="button"
-                  onPress={() => setPending({ kind: 'removeFollower', person })}
+                  onPress={() => ask({ kind: 'removeFollower', person })}
                   style={({ pressed }) => [
                     styles.removeButton,
                     pressed && styles.pressed,
@@ -193,7 +200,7 @@ export function ProfileScreen({
                 <Pressable
                   accessibilityLabel={`Unfollow ${person.name}`}
                   accessibilityRole="button"
-                  onPress={() => setPending({ kind: 'unfollow', person })}
+                  onPress={() => ask({ kind: 'unfollow', person })}
                   style={({ pressed }) => [
                     styles.followingPill,
                     pressed && styles.pressed,
@@ -216,9 +223,9 @@ export function ProfileScreen({
 
       <Modal
         animationType="fade"
-        onRequestClose={() => setPending(null)}
+        onRequestClose={() => setConfirmOpen(false)}
         transparent
-        visible={pending !== null}
+        visible={confirmOpen}
       >
         <View style={styles.modalBackdrop}>
           <View accessibilityViewIsModal style={styles.confirmation}>
@@ -253,7 +260,7 @@ export function ProfileScreen({
               <View style={styles.actionDivider} />
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setPending(null)}
+                onPress={() => setConfirmOpen(false)}
                 style={styles.confirmationAction}
               >
                 <Text style={styles.cancelText}>Cancel</Text>

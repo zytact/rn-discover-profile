@@ -25,7 +25,10 @@ create table public.profiles (
   profession text not null check (char_length(profession) <= 80),
   bio text not null check (char_length(bio) <= 1000 and public.word_count(bio) <= 120),
   avatar_path text not null,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- Users can only point at their own uploads or a bundled default.
+  constraint profiles_avatar_path_check
+    check (avatar_path like 'defaults/%' or starts_with(avatar_path, id::text || '/'))
 );
 
 -- One row per follow edge. Ids are auth user ids or person ids from src/data.ts,
@@ -165,15 +168,16 @@ create trigger on_auth_user_created
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('avatars', 'avatars', true, 2097152, array['image/jpeg', 'image/png', 'image/webp']);
 
--- Avatars live at avatars/<user id>/avatar. Upserting needs select and update too.
+-- Avatars live at avatars/<user id>/<random id>. Removing a replaced avatar
+-- needs select as well as delete.
 create policy "Users upload their own avatar"
   on storage.objects for insert to authenticated
   with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "Users read their own avatar object"
   on storage.objects for select to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
-create policy "Users replace their own avatar"
-  on storage.objects for update to authenticated
+create policy "Users delete their own avatar"
+  on storage.objects for delete to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
 
 insert into public.profiles (id, name, gender, location, profession, bio, avatar_path)

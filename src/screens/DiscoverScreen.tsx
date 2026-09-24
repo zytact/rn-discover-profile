@@ -3,9 +3,9 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   useFollowGraph,
+  useSetFollowing,
+  useSetStoryLiked,
   useStoryLikes,
-  useToggleFollow,
-  useToggleStoryLike,
 } from '../api/queries';
 import { StoryCard } from '../components/StoryCard';
 import { stories } from '../data';
@@ -21,8 +21,8 @@ export function DiscoverScreen({
   const visibleStories = filterStories(stories, { category, discoverQuery });
   const likedStoryIds = useStoryLikes().data ?? [];
   const following = useFollowGraph().data?.following ?? [];
-  const toggleLike = useToggleStoryLike();
-  const toggleFollow = useToggleFollow();
+  const setLiked = useSetStoryLiked();
+  const setFollowing = useSetFollowing();
 
   return (
     <ScrollView
@@ -55,13 +55,13 @@ export function DiscoverScreen({
               key={story.id}
               liked={liked}
               onToggleFollow={() =>
-                toggleFollow.mutate({
+                setFollowing.mutate({
                   personId: story.authorId,
-                  following: isFollowing,
+                  follow: !isFollowing,
                 })
               }
               onToggleLike={() =>
-                toggleLike.mutate({ storyId: story.id, liked })
+                setLiked.mutate({ storyId: story.id, like: !liked })
               }
               story={story}
             />
