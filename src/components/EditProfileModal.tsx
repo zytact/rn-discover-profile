@@ -1,6 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { launchImageLibraryAsync } from 'expo-image-picker';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -13,25 +16,65 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Constants } from '../api/database.types';
+import {
+  avatarSource,
+  type PickedAvatar,
+  type ProfileChanges,
+  useSaveProfile,
+} from '../api/queries';
+import { countWords } from '../format';
 import { colors, fonts } from '../theme';
 import type { Profile } from '../types';
+
+const maxBioWords = 120;
 
 type EditProfileModalProps = {
   profile: Profile;
   onClose: () => void;
-  onSave: (profile: Profile) => void;
 };
 
-export function EditProfileModal({
-  profile,
-  onClose,
-  onSave,
-}: EditProfileModalProps) {
+export function EditProfileModal({ profile, onClose }: EditProfileModalProps) {
   const insets = useSafeAreaInsets();
-  const [draft, setDraft] = useState(profile);
+  const saveProfile = useSaveProfile();
+  const [draft, setDraft] = useState<ProfileChanges>({
+    name: profile.name,
+    gender: profile.gender,
+    location: profile.location,
+    profession: profile.profession,
+    bio: profile.bio,
+  });
+  const [avatar, setAvatar] = useState<PickedAvatar | null>(null);
+  const bioWords = countWords(draft.bio);
+  const nameMissing = draft.name.trim().length === 0;
+  const canSave =
+    !nameMissing && bioWords <= maxBioWords && !saveProfile.isPending;
 
-  const update = (field: keyof Profile, value: string) =>
-    setDraft((current) => ({ ...current, [field]: value }));
+  const update = <Field extends keyof ProfileChanges>(
+    field: Field,
+    value: ProfileChanges[Field],
+  ) => setDraft((current) => ({ ...current, [field]: value }));
+
+  const pickPhoto = async () => {
+    const result = await launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    const asset = result.assets?.[0];
+    if (result.canceled || !asset) return;
+    setAvatar({ uri: asset.uri, mimeType: asset.mimeType ?? 'image/jpeg' });
+  };
+
+  const save = () =>
+    saveProfile.mutate(
+      { changes: { ...draft, name: draft.name.trim() }, avatar },
+      {
+        onSuccess: onClose,
+        onError: (error) => Alert.alert('Could not save', error.message),
+      },
+    );
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} visible>
@@ -54,44 +97,96 @@ export function EditProfileModal({
         >
           <View style={styles.photoArea}>
             <Image
-              source={require('../../assets/images/neha-sharma-cover.png')}
+              source={avatar ?? avatarSource(profile)}
               style={styles.coverPhoto}
             />
-            <View style={styles.cameraButton}>
+            <Pressable
+              accessibilityLabel="Change profile photo"
+              accessibilityRole="button"
+              onPress={() => void pickPhoto()}
+              style={({ pressed }) => [
+                styles.cameraButton,
+                pressed && styles.pressed,
+              ]}
+            >
               <Ionicons color={colors.teal} name="camera-outline" size={23} />
-            </View>
+            </Pressable>
           </View>
           <View style={styles.form}>
             <Field
+              error={nameMissing ? 'Name is required' : undefined}
               label="Name"
+              maxLength={60}
               onChangeText={(value) => update('name', value)}
               value={draft.name}
             />
+            <View style={styles.field}>
+              <Text style={styles.label}>Gender</Text>
+              <View accessibilityRole="radiogroup" style={styles.genderRow}>
+                {Constants.public.Enums.gender.map((gender) => {
+                  const selected = draft.gender === gender;
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      key={gender}
+                      onPress={() => update('gender', gender)}
+                      style={[styles.gender, selected && styles.genderActive]}
+                    >
+                      <Text
+                        style={[
+                          styles.genderText,
+                          selected && styles.genderTextActive,
+                        ]}
+                      >
+                        {gender}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
             <Field
               label="Location"
+              maxLength={80}
               onChangeText={(value) => update('location', value)}
               value={draft.location}
             />
             <Field
               label="Profession"
+              maxLength={80}
               onChangeText={(value) => update('profession', value)}
               value={draft.profession}
             />
             <Field
+              counter={`${bioWords}/${maxBioWords} words`}
+              error={
+                bioWords > maxBioWords
+                  ? `Use ${maxBioWords} words or fewer`
+                  : undefined
+              }
               label="Bio"
+              maxLength={1000}
               multiline
               onChangeText={(value) => update('bio', value)}
               value={draft.bio}
             />
             <Pressable
               accessibilityRole="button"
-              onPress={() => onSave(draft)}
+              accessibilityState={{ disabled: !canSave }}
+              disabled={!canSave}
+              onPress={save}
               style={({ pressed }) => [
                 styles.saveButton,
+                !canSave && styles.saveDisabled,
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.saveText}>Save changes</Text>
+              {saveProfile.isPending ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.saveText}>Save changes</Text>
+              )}
             </Pressable>
           </View>
         </ScrollView>
@@ -101,12 +196,18 @@ export function EditProfileModal({
 }
 
 function Field({
+  counter,
+  error,
   label,
+  maxLength,
   multiline = false,
   onChangeText,
   value,
 }: {
+  counter?: string;
+  error?: string;
   label: string;
+  maxLength: number;
   multiline?: boolean;
   onChangeText: (value: string) => void;
   value: string;
@@ -114,21 +215,31 @@ function Field({
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        multiline={multiline}
-        onChangeText={onChangeText}
-        style={[styles.input, multiline && styles.bioInput]}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        value={value}
-      />
+      <View>
+        <TextInput
+          accessibilityLabel={label}
+          maxLength={maxLength}
+          multiline={multiline}
+          onChangeText={onChangeText}
+          style={[
+            styles.input,
+            multiline && styles.bioInput,
+            error !== undefined && styles.inputError,
+          ]}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          value={value}
+        />
+        {counter && <Text style={styles.counter}>{counter}</Text>}
+      </View>
+      {error && <Text style={styles.error}>{error}</Text>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   bioInput: {
-    height: 104,
+    height: 120,
+    paddingBottom: 24,
     paddingTop: 12,
   },
   cameraButton: {
@@ -147,9 +258,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     width: 48,
   },
+  counter: {
+    bottom: 6,
+    color: colors.muted,
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    position: 'absolute',
+    right: 10,
+  },
   coverPhoto: {
     height: 180,
     width: '100%',
+  },
+  error: {
+    color: colors.red,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    marginTop: 4,
   },
   field: {
     marginBottom: 14,
@@ -157,6 +282,31 @@ const styles = StyleSheet.create({
   form: {
     paddingHorizontal: 18,
     paddingTop: 32,
+  },
+  gender: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 10,
+  },
+  genderActive: {
+    backgroundColor: colors.teal,
+    borderColor: colors.teal,
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: 9,
+    marginTop: 6,
+  },
+  genderText: {
+    color: colors.teal,
+    fontFamily: fonts.medium,
+    fontSize: 13,
+  },
+  genderTextActive: {
+    color: colors.white,
   },
   header: {
     alignItems: 'center',
@@ -184,6 +334,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingHorizontal: 13,
   },
+  inputError: {
+    borderColor: colors.red,
+    borderWidth: 1,
+  },
   label: {
     color: colors.muted,
     fontFamily: fonts.medium,
@@ -203,6 +357,9 @@ const styles = StyleSheet.create({
     height: 48,
     justifyContent: 'center',
     marginTop: 5,
+  },
+  saveDisabled: {
+    opacity: 0.5,
   },
   saveText: {
     color: colors.white,

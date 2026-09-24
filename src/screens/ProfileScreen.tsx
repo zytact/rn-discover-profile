@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -11,38 +12,93 @@ import {
   View,
 } from 'react-native';
 
-import type { AppAction, AppState } from '../state/appReducer';
-import { selectVisiblePeople } from '../state/appReducer';
+import {
+  avatarSource,
+  useFollowGraph,
+  useProfile,
+  useRemoveFollower,
+  useToggleFollow,
+} from '../api/queries';
+import {
+  type AppAction,
+  type AppState,
+  filterPeople,
+} from '../state/appReducer';
 import { colors, fonts } from '../theme';
 import type { Person } from '../types';
 
-type ProfileScreenProps = {
-  state: AppState;
+type ProfileScreenProps = Pick<AppState, 'peopleTab' | 'peopleQuery'> & {
   dispatch: (action: AppAction) => void;
   onEdit: () => void;
 };
 
-export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
-  const [pendingRemoval, setPendingRemoval] = useState<Person | null>(null);
-  const visiblePeople = selectVisiblePeople(state);
+type PendingAction = { kind: 'removeFollower' | 'unfollow'; person: Person };
 
-  const confirmRemoval = () => {
-    if (!pendingRemoval) return;
-    dispatch({ type: 'removeFollower', personId: pendingRemoval.id });
-    setPendingRemoval(null);
+export function ProfileScreen({
+  peopleTab,
+  peopleQuery,
+  dispatch,
+  onEdit,
+}: ProfileScreenProps) {
+  const profile = useProfile();
+  const graph = useFollowGraph();
+  const removeFollower = useRemoveFollower();
+  const toggleFollow = useToggleFollow();
+  const [pending, setPending] = useState<PendingAction | null>(null);
+
+  if (profile.isPending || graph.isPending) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={colors.teal} size="large" />
+      </View>
+    );
+  }
+
+  if (profile.isError || graph.isError) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.noPeople}>Could not load your profile.</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            void profile.refetch();
+            void graph.refetch();
+          }}
+          style={styles.retryButton}
+        >
+          <Text style={styles.editText}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const { followers, following } = graph.data;
+  const visiblePeople = filterPeople(
+    peopleTab === 'followers' ? followers : following,
+    peopleQuery,
+  );
+
+  const confirm = () => {
+    if (!pending) return;
+    if (pending.kind === 'removeFollower') {
+      removeFollower.mutate(pending.person.id);
+    } else {
+      toggleFollow.mutate({ personId: pending.person.id, following: true });
+    }
+    setPending(null);
   };
 
   return (
     <View style={styles.screen}>
       <View style={styles.summary}>
         <Image
-          source={require('../../assets/images/neha-sharma.png')}
+          source={avatarSource(profile.data)}
           style={styles.profileImage}
         />
         <View style={styles.identity}>
           <View style={styles.nameRow}>
             <Text numberOfLines={1} style={styles.name}>
-              {state.profile.name}
+              {profile.data.name}
             </Text>
             <Pressable
               accessibilityLabel="Edit profile"
@@ -58,18 +114,18 @@ export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
           </View>
           <View style={styles.detailRow}>
             <Ionicons color={colors.teal} name="location" size={15} />
-            <Text style={styles.detail}>{state.profile.location}</Text>
+            <Text style={styles.detail}>{profile.data.location}</Text>
           </View>
           <View style={styles.detailRow}>
             <Ionicons color={colors.teal} name="briefcase" size={14} />
-            <Text style={styles.detail}>{state.profile.profession}</Text>
+            <Text style={styles.detail}>{profile.data.profession}</Text>
           </View>
           <View style={styles.metrics}>
-            <Metric label="Feed" value="18" />
+            <Metric label="Feed" value={0} />
             <View style={styles.metricDivider} />
-            <Metric label="Followers" value="86k" />
+            <Metric label="Followers" value={followers.length} />
             <View style={styles.metricDivider} />
-            <Metric label="Following" value="12k" />
+            <Metric label="Following" value={following.length} />
           </View>
         </View>
       </View>
@@ -77,7 +133,7 @@ export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
       <View style={styles.peoplePanel}>
         <View accessibilityRole="tablist" style={styles.tabs}>
           {(['followers', 'following'] as const).map((tab) => {
-            const selected = state.peopleTab === tab;
+            const selected = peopleTab === tab;
             return (
               <Pressable
                 accessibilityRole="tab"
@@ -100,12 +156,12 @@ export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
         <View style={styles.peopleSearch}>
           <Ionicons color="#A8B0B4" name="search" size={23} />
           <TextInput
-            accessibilityLabel={`Search ${state.peopleTab}`}
-            onChangeText={(query) => dispatch({ type: 'searchProfile', query })}
-            placeholder={`Search ${state.peopleTab}`}
+            accessibilityLabel={`Search ${peopleTab}`}
+            onChangeText={(query) => dispatch({ type: 'searchPeople', query })}
+            placeholder={`Search ${peopleTab}`}
             placeholderTextColor="#A8B0B4"
             style={styles.peopleSearchInput}
-            value={state.profileQuery}
+            value={peopleQuery}
           />
         </View>
 
@@ -121,11 +177,11 @@ export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
                 <Text style={styles.personName}>{person.name}</Text>
                 <Text style={styles.personPhone}>{person.phone}</Text>
               </View>
-              {state.peopleTab === 'followers' ? (
+              {peopleTab === 'followers' ? (
                 <Pressable
                   accessibilityLabel={`Remove ${person.name}`}
                   accessibilityRole="button"
-                  onPress={() => setPendingRemoval(person)}
+                  onPress={() => setPending({ kind: 'removeFollower', person })}
                   style={({ pressed }) => [
                     styles.removeButton,
                     pressed && styles.pressed,
@@ -134,48 +190,70 @@ export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
                   <Text style={styles.removeText}>Remove</Text>
                 </Pressable>
               ) : (
-                <View style={styles.followingPill}>
+                <Pressable
+                  accessibilityLabel={`Unfollow ${person.name}`}
+                  accessibilityRole="button"
+                  onPress={() => setPending({ kind: 'unfollow', person })}
+                  style={({ pressed }) => [
+                    styles.followingPill,
+                    pressed && styles.pressed,
+                  ]}
+                >
                   <Text style={styles.followingPillText}>Following</Text>
-                </View>
+                </Pressable>
               )}
             </View>
           ))}
           {visiblePeople.length === 0 && (
-            <Text style={styles.noPeople}>No matching people</Text>
+            <Text style={styles.noPeople}>
+              {peopleQuery.trim() === ''
+                ? `No ${peopleTab} yet`
+                : 'No matching people'}
+            </Text>
           )}
         </ScrollView>
       </View>
 
       <Modal
         animationType="fade"
-        onRequestClose={() => setPendingRemoval(null)}
+        onRequestClose={() => setPending(null)}
         transparent
-        visible={pendingRemoval !== null}
+        visible={pending !== null}
       >
         <View style={styles.modalBackdrop}>
           <View accessibilityViewIsModal style={styles.confirmation}>
-            {pendingRemoval && (
-              <Image
-                source={pendingRemoval.avatar}
-                style={styles.confirmationAvatar}
-              />
+            {pending && (
+              <>
+                <Image
+                  source={pending.person.avatar}
+                  style={styles.confirmationAvatar}
+                />
+                <Text style={styles.confirmationTitle}>
+                  {pending.kind === 'removeFollower'
+                    ? 'Remove follower?'
+                    : `Unfollow ${pending.person.name}?`}
+                </Text>
+                <Text style={styles.confirmationCopy}>
+                  {pending.kind === 'removeFollower'
+                    ? `We won't tell ${pending.person.name} they were removed from your followers.`
+                    : 'You can follow them again from their stories in Discover.'}
+                </Text>
+              </>
             )}
-            <Text style={styles.confirmationTitle}>Remove follower?</Text>
-            <Text style={styles.confirmationCopy}>
-              {`We won't tell ${pendingRemoval?.name ?? 'them'} they were removed from your followers.`}
-            </Text>
             <View style={styles.confirmationActions}>
               <Pressable
                 accessibilityRole="button"
-                onPress={confirmRemoval}
+                onPress={confirm}
                 style={styles.confirmationAction}
               >
-                <Text style={styles.destructiveText}>Remove</Text>
+                <Text style={styles.destructiveText}>
+                  {pending?.kind === 'unfollow' ? 'Unfollow' : 'Remove'}
+                </Text>
               </Pressable>
               <View style={styles.actionDivider} />
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setPendingRemoval(null)}
+                onPress={() => setPending(null)}
                 style={styles.confirmationAction}
               >
                 <Text style={styles.cancelText}>Cancel</Text>
@@ -188,7 +266,7 @@ export function ProfileScreen({ state, dispatch, onEdit }: ProfileScreenProps) {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value }: { label: string; value: number }) {
   return (
     <View style={styles.metric}>
       <Text style={styles.metricValue}>{value}</Text>
@@ -207,6 +285,12 @@ const styles = StyleSheet.create({
     color: colors.teal,
     fontFamily: fonts.semibold,
     fontSize: 15,
+  },
+  centered: {
+    alignItems: 'center',
+    backgroundColor: colors.mist,
+    flex: 1,
+    justifyContent: 'center',
   },
   confirmation: {
     alignItems: 'center',
@@ -420,6 +504,13 @@ const styles = StyleSheet.create({
     color: colors.teal,
     fontFamily: fonts.medium,
     fontSize: 10,
+  },
+  retryButton: {
+    backgroundColor: colors.teal,
+    borderRadius: 15,
+    marginTop: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
   },
   screen: {
     backgroundColor: '#E8EEF0',

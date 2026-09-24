@@ -5,11 +5,14 @@ import {
   useFonts,
 } from '@expo-google-fonts/poppins';
 import { Ionicons } from '@expo/vector-icons';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useReducer, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   BackHandler,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Pressable,
@@ -19,6 +22,8 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { useProfile } from './src/api/queries';
+import { SessionGate } from './src/api/session';
 import { AppHeader } from './src/components/AppHeader';
 import { BottomNavigation } from './src/components/BottomNavigation';
 import { EditProfileModal } from './src/components/EditProfileModal';
@@ -32,6 +37,10 @@ import {
 import { colors, fonts } from './src/theme';
 import type { AppTab } from './src/types';
 
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 30_000 } },
+});
+
 export default function App() {
   const [fontsLoaded, fontError] = useFonts({
     Poppins_400Regular,
@@ -44,7 +53,35 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <AppContent />
+      <QueryClientProvider client={queryClient}>
+        <SessionGate
+          failed={(retry) => (
+            <View style={styles.gate}>
+              <Image
+                source={require('./assets/images/bwstory-logo.png')}
+                style={styles.gateLogo}
+              />
+              <Text style={styles.gateCopy}>
+                Could not connect. Check your internet connection.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={retry}
+                style={styles.gateButton}
+              >
+                <Text style={styles.gateButtonText}>Try again</Text>
+              </Pressable>
+            </View>
+          )}
+          loading={
+            <View style={styles.gate}>
+              <ActivityIndicator color={colors.teal} size="large" />
+            </View>
+          }
+        >
+          <AppContent />
+        </SessionGate>
+      </QueryClientProvider>
     </SafeAreaProvider>
   );
 }
@@ -54,6 +91,7 @@ function AppContent() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const profile = useProfile().data;
 
   const navigate = (tab: AppTab) => {
     dispatch({ type: 'navigate', tab });
@@ -72,31 +110,26 @@ function AppContent() {
     return () => subscription.remove();
   }, [state.activeTab]);
 
-  const query =
-    state.activeTab === 'discover' ? state.discoverQuery : state.profileQuery;
-  const setQuery = (nextQuery: string) =>
-    dispatch(
-      state.activeTab === 'discover'
-        ? { type: 'searchDiscover', query: nextQuery }
-        : { type: 'searchProfile', query: nextQuery },
-    );
-
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <AppHeader
-        onChangeQuery={setQuery}
+        onChangeQuery={(query) => dispatch({ type: 'searchDiscover', query })}
         onFilterPress={() => setFiltersOpen(true)}
         onMenuPress={() => setMenuOpen(true)}
-        query={query}
+        query={state.discoverQuery}
       />
       <KeyboardAvoidingView behavior="padding" style={styles.body}>
         {state.activeTab === 'discover' ? (
-          <DiscoverScreen dispatch={dispatch} state={state} />
+          <DiscoverScreen
+            category={state.category}
+            discoverQuery={state.discoverQuery}
+          />
         ) : (
           <ProfileScreen
             dispatch={dispatch}
             onEdit={() => setEditing(true)}
-            state={state}
+            peopleQuery={state.peopleQuery}
+            peopleTab={state.peopleTab}
           />
         )}
       </KeyboardAvoidingView>
@@ -121,15 +154,8 @@ function AppContent() {
           setFiltersOpen(false);
         }}
       />
-      {editing && (
-        <EditProfileModal
-          onClose={() => setEditing(false)}
-          onSave={(profile) => {
-            dispatch({ type: 'updateProfile', profile });
-            setEditing(false);
-          }}
-          profile={state.profile}
-        />
+      {editing && profile && (
+        <EditProfileModal onClose={() => setEditing(false)} profile={profile} />
       )}
     </SafeAreaView>
   );
@@ -156,10 +182,15 @@ function MenuModal({
       <View style={styles.modalRow}>
         <View accessibilityViewIsModal style={styles.drawer}>
           <View style={styles.drawerHeading}>
-            <View>
-              <Text style={styles.drawerBrand}>Discover</Text>
+            <View style={styles.drawerBrand}>
+              <Image
+                accessibilityLabel="BWstory"
+                resizeMode="contain"
+                source={require('./assets/images/bwstory-logo.png')}
+                style={styles.drawerLogo}
+              />
               <Text style={styles.drawerTagline}>
-                News from people around you
+                Take your phone, shoot the video, spread the news
               </Text>
             </View>
             <Pressable
@@ -167,7 +198,7 @@ function MenuModal({
               hitSlop={12}
               onPress={onClose}
             >
-              <Ionicons color={colors.white} name="close" size={27} />
+              <Ionicons color={colors.ink} name="close" size={27} />
             </Pressable>
           </View>
           <DrawerItem
@@ -324,12 +355,11 @@ const styles = StyleSheet.create({
     width: '78%',
   },
   drawerBrand: {
-    color: colors.white,
-    fontFamily: fonts.semibold,
-    fontSize: 24,
+    flex: 1,
   },
   drawerHeading: {
-    backgroundColor: colors.teal,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingBottom: 28,
@@ -361,11 +391,46 @@ const styles = StyleSheet.create({
     backgroundColor: colors.scrim,
     flex: 1,
   },
+  drawerLogo: {
+    height: 54,
+    width: 144,
+  },
   drawerTagline: {
-    color: '#C9D7DC',
+    color: colors.muted,
     fontFamily: fonts.regular,
     fontSize: 11,
     marginTop: 2,
+  },
+  gate: {
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 32,
+  },
+  gateButton: {
+    backgroundColor: colors.teal,
+    borderRadius: 22,
+    marginTop: 18,
+    paddingHorizontal: 28,
+    paddingVertical: 11,
+  },
+  gateButtonText: {
+    color: colors.white,
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+  },
+  gateCopy: {
+    color: colors.muted,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    marginTop: 24,
+    textAlign: 'center',
+  },
+  gateLogo: {
+    height: 72,
+    resizeMode: 'contain',
+    width: 192,
   },
   loading: {
     backgroundColor: colors.white,
